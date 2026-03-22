@@ -1,13 +1,16 @@
 let bioGridA, bioGridB, bioNextA, bioNextB;
 let bioSimWidth, bioSimHeight;
-let bioSimScale = 3; 
+
+// Maximum resolution: 1 simulation cell = 1 screen pixel
+let bioSimScale = 1; 
 
 // Stable regime parameters for the interior
 let bioDA = 1.0;
 let bioDB = 0.5;
 let bioFeed = 0.029;
 let bioKill = 0.057;
-let bioSpeed = 3; 
+// Slightly reduced speed to compensate for the massive 1:1 resolution calculation
+let bioSpeed = 2; 
 
 let bioMaskPixels = [];
 let bioEdgeMask = []; 
