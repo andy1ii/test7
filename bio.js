@@ -2,7 +2,7 @@ let bioGridA, bioGridB, bioNextA, bioNextB;
 let bioSimWidth, bioSimHeight;
 
 // Simulation runs at a lower scale for massive performance gains,
-// while the high-res mask overlay handles the perfect, crisp edges!
+// while the GPU shader handles the perfect, high-res crisp edges!
 let bioSimScale = 3; 
 
 // Stable regime parameters for the interior
@@ -20,7 +20,7 @@ let bioValidSpots = [];
 let valid_i, valid_x, valid_y, valid_edge;
 
 let bioRenderImg;
-let bioMaskOverlay; 
+let bioMaskLayer; // High-res native mask for the GPU
 
 let bioWebglLayer;
 let bioRenderShader;
@@ -44,6 +44,7 @@ const bioFragSource = `
   precision highp float;
   varying vec2 vTexCoord;
   uniform sampler2D u_tex;
+  uniform sampler2D u_maskTex; // High-quality, anti-aliased mask uniform
   uniform vec2 u_resolution;
   uniform float u_time;
 
@@ -57,12 +58,22 @@ const bioFragSource = `
   }
 
   void main() {
+      // Pure, undistorted texture coordinates
       vec2 uv = vec2(vTexCoord.x, 1.0 - vTexCoord.y);
       vec2 texel = 1.0 / (u_resolution * 0.5);
 
+      // 1. Sample the high-res GPU mask. 1.0 = inside logo, 0.0 = outside.
+      float maskVal = texture2D(u_maskTex, uv).r;
+      
+      // Completely discard rendering if outside the sharp logo boundary
+      if (maskVal < 0.01) {
+          gl_FragColor = vec4(1.0, 1.0, 1.0, 0.0); 
+          return;
+      }
+
       float h = texture2D(u_tex, uv).r;
       
-      // Softer threshold for a smoother, more liquid look
+      // Softer threshold for a smoother, more liquid look inside the fungi
       float cellularAlpha = smoothstep(0.0, 0.15, h);
 
       float hx = texture2D(u_tex, uv + vec2(texel.x * 2.0, 0.0)).r;
@@ -98,20 +109,20 @@ const bioFragSource = `
 
       vec3 patternColorWithInternalValleys = mix(vec3(1.0, 1.0, 1.0), finalColor, cellularAlpha);
       
-      // Output solid color. The 2D Overlay Mask will perfectly carve out the edges!
-      gl_FragColor = vec4(patternColorWithInternalValleys, 1.0); 
+      // 2. Output pattern, using the native mask boundary for a perfectly sharp, anti-aliased edge
+      gl_FragColor = vec4(patternColorWithInternalValleys, maskVal); 
   }
 `;
 // ------------------------------------------------------------------
 
 function setupBio() {
-  // Generate the mask at native screen pixel density for razor-sharp edges
-  bioMaskOverlay = createGraphics(windowWidth, windowHeight);
-  bioMaskOverlay.pixelDensity(pixelDensity()); 
-  
   bioWebglLayer = createGraphics(windowWidth, windowHeight, WEBGL);
   bioWebglLayer.setAttributes('antialias', true);
   bioWebglLayer.noStroke(); 
+  
+  // Creates a crisp 2D graphics layer matching the native screen resolution
+  bioMaskLayer = createGraphics(windowWidth, windowHeight);
+  bioMaskLayer.pixelDensity(pixelDensity());
   
   bioRenderShader = bioWebglLayer.createShader(bioVertSource, bioFragSource);
 
@@ -119,8 +130,8 @@ function setupBio() {
 }
 
 function windowResizedBio() {
-  bioMaskOverlay.resizeCanvas(windowWidth, windowHeight);
   bioWebglLayer.resizeCanvas(windowWidth, windowHeight);
+  bioMaskLayer.resizeCanvas(windowWidth, windowHeight);
   initBioSimulation(true);
 }
 
@@ -133,6 +144,11 @@ function initBioSimulation(rebuildArrays = false) {
   let hrH = floor(logoImg.height * scaleFactor);
   let hrX = floor((width - hrW) / 2);
   let hrY = floor((height - hrH) / 2);
+
+  // Draw the high-res native mask for the GPU shader
+  bioMaskLayer.clear();
+  bioMaskLayer.background(0); // Black background = 0.0 alpha in shader
+  bioMaskLayer.image(logoImg, hrX, hrY, hrW, hrH); // White logo = 1.0 alpha in shader
 
   if (rebuildArrays) {
     bioSimWidth = floor(width / bioSimScale);
@@ -168,28 +184,6 @@ function initBioSimulation(rebuildArrays = false) {
     }
     pg.remove();
   }
-
-  // --- HIGH-RESOLUTION, ANTI-ALIASED STENCIL OVERLAY ---
-  bioMaskOverlay.clear();
-  bioMaskOverlay.background(0); // Black background
-  bioMaskOverlay.image(logoImg, hrX, hrY, hrW, hrH); // White logo
-  bioMaskOverlay.loadPixels();
-
-  let overlayPixels = bioMaskOverlay.pixels;
-  let len = overlayPixels.length;
-  
-  for (let i = 0; i < len; i += 4) {
-    let logoIntensity = overlayPixels[i]; 
-    // Fill the overlay with solid white
-    overlayPixels[i] = 255;
-    overlayPixels[i+1] = 255;
-    overlayPixels[i+2] = 255;
-    
-    // Invert the logo's native anti-aliasing into the alpha channel.
-    // White logo = 0 alpha (transparent hole). Black bg = 255 alpha (solid white cover).
-    overlayPixels[i+3] = 255 - logoIntensity; 
-  }
-  bioMaskOverlay.updatePixels();
 
   // Reset arrays
   bioValidSpots = [];
@@ -293,16 +287,13 @@ function drawBio() {
   
   bioWebglLayer.shader(bioRenderShader);
   bioRenderShader.setUniform('u_tex', bioRenderImg);
+  bioRenderShader.setUniform('u_maskTex', bioMaskLayer); // Pass the high-res native mask!
   bioRenderShader.setUniform('u_resolution', [width, height]);
   bioRenderShader.setUniform('u_time', millis() / 1000.0);
   
   bioWebglLayer.rect(-width / 2, -height / 2, width, height);
 
-  // 1. Draw the fast, organic fluid layer
   image(bioWebglLayer, 0, 0, width, height);
-  
-  // 2. Lay down the flawless, native-resolution masking stencil on top
-  image(bioMaskOverlay, 0, 0, width, height);
 }
 
 function updateBioSimulation() {
