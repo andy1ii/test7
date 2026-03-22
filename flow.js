@@ -6,7 +6,7 @@ let flowZOff = 0;
 let flowColors;
 
 function setupFlow() {
-  // Deep blue, bright blue, cyan, and vibrant orange to pop on the white background
+  // Deep blue, bright blue, cyan, and vibrant orange to pop on the dark indigo background
   flowColors = [color('#0033aa'), color('#0077ff'), color('#00ddff'), color('#ff6600')];
   processFlowMask();
   initParticles();
@@ -84,17 +84,18 @@ function spawnParticle(randomizeLife = false) {
 }
 
 function drawFlow() {
-  // 1. Instant mode-switch fix: Wipe the canvas to pure white when initializing
+  // 1. Instant mode-switch fix: Wipe the canvas to deep indigo when initializing
   if (needsClear) {
-    background('#FFFFFF');
+    background('#080C22'); // Deep midnight indigo background
     initParticles(); // Respawn all particles so they don't carry over weird velocities
     needsClear = false;
   }
 
-  // Draw a semi-transparent white background to create smooth motion blur trails
+  // Draw a semi-transparent background to create smooth motion blur trails
   push();
   noStroke();
-  fill(255, 255, 255, 12); // Low opacity white leaves elegant trails behind the ink
+  // RGB values for #080C22 (8, 12, 34) with low opacity (15) for elegant trails
+  fill(19, 28, 81, 15); 
   rectMode(CORNER);
   rect(0, 0, width, height);
   pop();
@@ -125,16 +126,8 @@ function drawFlow() {
     if (p.life <= 0 || isOutsideMask) {
       Object.assign(p, spawnParticle(false));
     } else {
-      let alphaMod = 255; // Start fully opaque (no spawn fade-in to prevent laggy look)
-      
-      // Only fade out smoothly when the particle is about to die
-      if (p.life < 30) {
-          alphaMod = map(p.life, 0, 30, 0, 255, true);
-      }
-      
-      let currentC = color(p.c);
-      currentC.setAlpha(alphaMod);
-      stroke(currentC);
+      // 🚀 NO FADE LOGIC: Particles remain 100% opaque for their entire lifespan
+      stroke(p.c);
       strokeWeight(p.w);
       line(p.prev.x, p.prev.y, p.pos.x, p.pos.y);
     }
