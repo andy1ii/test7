@@ -1,0 +1,58 @@
+/* Load the font through CSS instead of p5.js */
+@font-face {
+  font-family: 'CursorMono';
+  src: url('resources/CursorMono260219-Regular.otf') format('opentype');
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden; 
+  background-color: #080808; 
+  /* Add your custom font to the font-family stack */
+  font-family: 'CursorMono', 'Courier New', Courier, monospace;
+}
+
+canvas {
+  display: block;
+}
+
+/* Floating control menu */
+.controls {
+  position: absolute;
+  top: 15px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  background: rgba(40, 40, 40, 0.7);
+  padding: 8px 12px;
+  border-radius: 25px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(5px);
+}
+
+.controls button {
+  background: transparent;
+  color: #aaa;
+  border: 1px solid #666;
+  padding: 6px 14px;
+  font-size: 13px;
+  border-radius: 15px;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: bold;
+  transition: all 0.3s;
+}
+
+.controls button:hover {
+  color: #fff;
+  border-color: #aaa;
+}
+
+.controls button.active {
+  background: #0077FF; 
+  color: #FFF;
+  border-color: #0077FF;
+  box-shadow: 0 0 10px rgba(0, 119, 255, 0.4);
+}

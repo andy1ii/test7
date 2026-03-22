@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cursor Generative Logo</title>
+  <link rel="stylesheet" href="style.css">
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+</head>
+<body>
+
+  <div class="controls">
+    <button id="btn-cube" class="active" onclick="setMode('cube')">CUBE</button>
+    <button id="btn-mesh" onclick="setMode('mesh')">MESH</button>
+    <button id="btn-flow" onclick="setMode('flow')">FLOW</button>
+    <button id="btn-lines" onclick="setMode('lines')">LINES</button> 
+    <button id="btn-shader" onclick="setMode('shader')">SHADER</button>
+    <button id="btn-bio" onclick="setMode('bio')">BIO</button>
+  </div>
+
+  <script src="cube.js"></script>
+  <script src="mesh.js"></script>
+  <script src="flow.js"></script>
+  <script src="lines.js"></script> 
+  <script src="shader.js"></script>
+  <script src="bio.js"></script>
+  
+  <script src="sketch.js"></script>
+  
+</body>
+</html>
