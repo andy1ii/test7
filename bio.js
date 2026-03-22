@@ -1,8 +1,5 @@
 let bioGridA, bioGridB, bioNextA, bioNextB;
 let bioSimWidth, bioSimHeight;
-
-// Simulation runs at a lower scale for massive performance gains,
-// while the GPU shader handles the perfect, high-res crisp edges!
 let bioSimScale = 3; 
 
 // Stable regime parameters for the interior
@@ -20,7 +17,7 @@ let bioValidSpots = [];
 let valid_i, valid_x, valid_y, valid_edge;
 
 let bioRenderImg;
-let bioMaskLayer; // High-res native mask for the GPU
+let bioMaskOverlay; 
 
 let bioWebglLayer;
 let bioRenderShader;
@@ -44,7 +41,6 @@ const bioFragSource = `
   precision highp float;
   varying vec2 vTexCoord;
   uniform sampler2D u_tex;
-  uniform sampler2D u_maskTex; // High-quality, anti-aliased mask uniform
   uniform vec2 u_resolution;
   uniform float u_time;
 
@@ -58,39 +54,42 @@ const bioFragSource = `
   }
 
   void main() {
-      // Pure, undistorted texture coordinates
       vec2 uv = vec2(vTexCoord.x, 1.0 - vTexCoord.y);
       vec2 texel = 1.0 / (u_resolution * 0.5);
 
-      // 1. Sample the high-res GPU mask. 1.0 = inside logo, 0.0 = outside.
-      float maskVal = texture2D(u_maskTex, uv).r;
-      
-      // Completely discard rendering if outside the sharp logo boundary
-      if (maskVal < 0.01) {
-          gl_FragColor = vec4(1.0, 1.0, 1.0, 0.0); 
-          return;
-      }
-
       float h = texture2D(u_tex, uv).r;
       
-      // Softer threshold for a smoother, more liquid look inside the fungi
-      float cellularAlpha = smoothstep(0.0, 0.15, h);
+      // If empty, discard to save performance
+      if (h < 0.02) {
+          gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0); 
+          return;
+      }
 
       float hx = texture2D(u_tex, uv + vec2(texel.x * 2.0, 0.0)).r;
       float hy = texture2D(u_tex, uv + vec2(0.0, texel.y * 2.0)).r;
 
-      float bumpScale = 2.0;
-      vec3 normal = normalize(vec3((h - hx) * bumpScale, (h - hy) * bumpScale, 0.15));
+      // --- SUBTLE, FLAT EDGES ---
+      // Lowered bump scale and increased Z thickness for a softer look
+      float bumpScale = 0.6; 
+      vec3 normal = normalize(vec3((h - hx) * bumpScale, (h - hy) * bumpScale, 0.6));
 
+      // The Magic: Force the normal to be completely flat right at the edges of the fungi!
+      // This totally destroys the harsh, extruded "cliff" shadow.
+      float edgeFlatten = smoothstep(0.0, 0.15, h);
+      normal = mix(vec3(0.0, 0.0, 1.0), normal, edgeFlatten);
+
+      // Subtle surface texture
       float microNoise = noise(uv * 400.0 + u_time * 0.2);
-      normal = normalize(normal + vec3(microNoise * 0.08, microNoise * 0.08, 0.0));
+      normal = normalize(normal + vec3(microNoise * 0.04, microNoise * 0.04, 0.0));
 
       vec3 lightDir = normalize(vec3(-0.8, -0.8, 1.2));
       vec3 viewDir = vec3(0.0, 0.0, 1.0);
 
       float diffuse = max(0.0, (dot(normal, lightDir) + 0.5) / 1.5);
       vec3 halfVector = normalize(lightDir + viewDir);
-      float specular = pow(max(dot(normal, halfVector), 0.0), 80.0) * 1.5;
+      
+      // Softer specular highlight
+      float specular = pow(max(dot(normal, halfVector), 0.0), 50.0) * 0.8; 
       float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 3.0);
 
       vec3 valleyColor = vec3(0.12, 0.31, 0.86);
@@ -102,27 +101,26 @@ const bioFragSource = `
 
       vec3 finalColor = albedo * diffuse;
       finalColor += vec3(1.0) * specular; 
-      finalColor += peakColor * fresnel * 0.6; 
+      finalColor += peakColor * fresnel * 0.4; 
 
       finalColor = finalColor / (finalColor + vec3(0.8));
       finalColor = pow(finalColor, vec3(1.0 / 2.2));
 
+      float cellularAlpha = smoothstep(0.0, 0.15, h);
       vec3 patternColorWithInternalValleys = mix(vec3(1.0, 1.0, 1.0), finalColor, cellularAlpha);
       
-      // 2. Output pattern, using the native mask boundary for a perfectly sharp, anti-aliased edge
-      gl_FragColor = vec4(patternColorWithInternalValleys, maskVal); 
+      gl_FragColor = vec4(patternColorWithInternalValleys, 1.0); 
   }
 `;
 // ------------------------------------------------------------------
 
 function setupBio() {
+  bioMaskOverlay = createGraphics(windowWidth, windowHeight);
+  bioMaskOverlay.pixelDensity(1); // Locked to 1 to fix Github scaling bug
+  
   bioWebglLayer = createGraphics(windowWidth, windowHeight, WEBGL);
   bioWebglLayer.setAttributes('antialias', true);
   bioWebglLayer.noStroke(); 
-  
-  // Creates a crisp 2D graphics layer matching the native screen resolution
-  bioMaskLayer = createGraphics(windowWidth, windowHeight);
-  bioMaskLayer.pixelDensity(pixelDensity());
   
   bioRenderShader = bioWebglLayer.createShader(bioVertSource, bioFragSource);
 
@@ -130,8 +128,8 @@ function setupBio() {
 }
 
 function windowResizedBio() {
+  bioMaskOverlay.resizeCanvas(windowWidth, windowHeight);
   bioWebglLayer.resizeCanvas(windowWidth, windowHeight);
-  bioMaskLayer.resizeCanvas(windowWidth, windowHeight);
   initBioSimulation(true);
 }
 
@@ -144,11 +142,6 @@ function initBioSimulation(rebuildArrays = false) {
   let hrH = floor(logoImg.height * scaleFactor);
   let hrX = floor((width - hrW) / 2);
   let hrY = floor((height - hrH) / 2);
-
-  // Draw the high-res native mask for the GPU shader
-  bioMaskLayer.clear();
-  bioMaskLayer.background(0); // Black background = 0.0 alpha in shader
-  bioMaskLayer.image(logoImg, hrX, hrY, hrW, hrH); // White logo = 1.0 alpha in shader
 
   if (rebuildArrays) {
     bioSimWidth = floor(width / bioSimScale);
@@ -165,14 +158,12 @@ function initBioSimulation(rebuildArrays = false) {
 
     bioRenderImg = createImage(bioSimWidth, bioSimHeight);
     
-    // Set fixed alpha channel once to avoid updating it every frame
     bioRenderImg.loadPixels();
     for (let i = 0; i < totalCells; i++) {
         bioRenderImg.pixels[i * 4 + 3] = 255;
     }
     bioRenderImg.updatePixels();
 
-    // Fast, low-res mask purely for simulation logic bounds
     let pg = createGraphics(bioSimWidth, bioSimHeight);
     pg.pixelDensity(1); 
     pg.background(0);
@@ -185,7 +176,24 @@ function initBioSimulation(rebuildArrays = false) {
     pg.remove();
   }
 
-  // Reset arrays
+  // Crisp visual mask overlay
+  bioMaskOverlay.clear();
+  bioMaskOverlay.background(255);
+  bioMaskOverlay.image(logoImg, hrX, hrY, hrW, hrH);
+  bioMaskOverlay.loadPixels();
+
+  for (let i = 0; i < bioMaskOverlay.pixels.length; i += 4) {
+    if (bioMaskOverlay.pixels[i] > 128 && bioMaskOverlay.pixels[i+1] > 128 && bioMaskOverlay.pixels[i+2] > 128) {
+      bioMaskOverlay.pixels[i+3] = 0; // Cut a transparent hole for the logo
+    } else {
+      bioMaskOverlay.pixels[i] = 255; 
+      bioMaskOverlay.pixels[i+1] = 255;
+      bioMaskOverlay.pixels[i+2] = 255;
+      bioMaskOverlay.pixels[i+3] = 255; // White background
+    }
+  }
+  bioMaskOverlay.updatePixels();
+
   bioValidSpots = [];
   let sw = bioSimWidth;
   let totalCells = bioSimWidth * bioSimHeight;
@@ -198,7 +206,6 @@ function initBioSimulation(rebuildArrays = false) {
     bioEdgeMask[i] = 0;
   }
 
-  // Detect logo edges for fungi dissolution
   for (let y = 1; y < bioSimHeight - 1; y++) {
     for (let x = 1; x < sw - 1; x++) {
       let i = x + y * sw;
@@ -217,8 +224,6 @@ function initBioSimulation(rebuildArrays = false) {
     }
   }
 
-  // --- MASSIVE MEMORY OPTIMIZATION ---
-  // Pack all valid spot logic into raw typed arrays for instant memory access
   let validCount = bioValidSpots.length;
   valid_i = new Int32Array(validCount);
   valid_x = new Int32Array(validCount);
@@ -229,11 +234,10 @@ function initBioSimulation(rebuildArrays = false) {
       let i = bioValidSpots[k];
       valid_i[k] = i;
       valid_x[k] = i % sw;
-      valid_y[k] = ~~(i / sw); // Math.floor replacement
+      valid_y[k] = ~~(i / sw); 
       valid_edge[k] = bioEdgeMask[i];
   }
 
-  // Initial seed
   for(let i = 0; i < 25; i++) {
     if (validCount > 0) {
       let spot = bioValidSpots[floor(random(validCount))];
@@ -249,7 +253,6 @@ function initBioSimulation(rebuildArrays = false) {
 function drawBio() {
   background(255); 
 
-  // Drop new spores to keep the organism alive
   if (bioValidSpots.length > 0) {
     for (let k = 0; k < 4; k++) {
       let spot = bioValidSpots[floor(random(bioValidSpots.length))];
@@ -270,7 +273,6 @@ function drawBio() {
   let pixels = bioRenderImg.pixels;
   let len = valid_i.length;
 
-  // Only update RGB values of the valid logo pixels
   for (let k = 0; k < len; k++) {
     let i = valid_i[k];
     let c = bioGridB[i] * 255; 
@@ -287,13 +289,14 @@ function drawBio() {
   
   bioWebglLayer.shader(bioRenderShader);
   bioRenderShader.setUniform('u_tex', bioRenderImg);
-  bioRenderShader.setUniform('u_maskTex', bioMaskLayer); // Pass the high-res native mask!
   bioRenderShader.setUniform('u_resolution', [width, height]);
   bioRenderShader.setUniform('u_time', millis() / 1000.0);
   
   bioWebglLayer.rect(-width / 2, -height / 2, width, height);
 
   image(bioWebglLayer, 0, 0, width, height);
+  // Razor sharp, non-scaled mask sits cleanly on top
+  image(bioMaskOverlay, 0, 0, width, height);
 }
 
 function updateBioSimulation() {
@@ -301,7 +304,6 @@ function updateBioSimulation() {
   let sh = bioSimHeight;
   let t = millis() * 0.0004; 
   
-  // Precalculate advection fields (Wind)
   let waveX_Feed = new Float32Array(sw);
   let waveX_Sin = new Float32Array(sw);
   let waveX_Cos = new Float32Array(sw);
@@ -322,9 +324,7 @@ function updateBioSimulation() {
   
   let len = valid_i.length;
   
-  // Only calculate reaction/diffusion for valid logo spots
   for (let k = 0; k < len; k++) {
-    // Zero math array lookups using pre-packed data
     let i = valid_i[k];
     let x = valid_x[k];
     let y = valid_y[k];
